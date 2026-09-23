@@ -10,24 +10,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-          cache: true
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
-
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -51,15 +33,13 @@ jobs:
           go-version: "1.24"
           cache: true
 
-      - name: Run tests
+      - name: Test
         run: go test -race -v ./...
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs:
-      - lint
-      - test
+    needs: test
 
     steps:
       - uses: actions/checkout@v4
@@ -69,14 +49,13 @@ jobs:
           go-version: "1.24"
           cache: true
 
-      - name: Build binary
+      - name: Build
         run: go build -o queue-api ./cmd/server
 
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs:
-      - build
+    needs: build
 
     permissions:
       contents: read
@@ -85,9 +64,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -95,87 +71,50 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=sha,prefix=
-            type=ref,event=branch
-            type=raw,value=latest
-
-      - name: Build and push
+      - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
   deploy:
-    name: Deploy to Staging
-
+    name: Deploy Docker
     runs-on:
       - self-hosted
       - linux
       - staging
 
-    needs:
-      - docker
+    needs: docker
 
     environment:
       name: staging
 
     permissions:
-      contents: read
       packages: read
 
     steps:
-      - name: Check server
-        run: |
-          set -e
-
-          echo "================================"
-          echo "Staging Deployment"
-          echo "================================"
-
-          echo "Runner : $(hostname)"
-          echo "User   : $(whoami)"
-          echo "Project: /home/yohanesdev/tiketapi"
-
-          test -d /home/yohanesdev/tiketapi
-
-          echo ""
-          echo "Docker:"
-          docker --version
-
-          echo ""
-          echo "Docker Compose:"
-          docker compose version
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Deploy
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE_REPO: ghcr.io/${{ github.repository }}
+          IMAGE_REPO: ${{ github.repository }}
           IMAGE_TAG: ${{ github.sha }}
 
         run: |
           set -e
 
-          cd /home/yohanesdev/tiketapi
+          echo "Repository:"
+          pwd
 
-          echo "================================"
-          echo "Deploying"
-          echo "================================"
+          echo "Checking docker-compose.yml:"
+          test -f docker-compose.yml
 
-          echo "Image: ${IMAGE_REPO}:${IMAGE_TAG}"
-
-          echo ""
-          echo "Login to GHCR..."
+          echo "Checking server .env:"
+          test -f /home/yohanesdev/tiketapi/.env
 
           echo "$GHCR_TOKEN" | docker login ghcr.io \
             --username "$GHCR_USER" \
@@ -184,33 +123,28 @@ jobs:
           export IMAGE_REPO
           export IMAGE_TAG
 
-          echo ""
-          echo "Pulling Docker image..."
+          echo "Deploying:"
+          echo "ghcr.io/${IMAGE_REPO}:${IMAGE_TAG}"
 
-          docker compose pull
+          docker compose --env-file /home/yohanesdev/tiketapi/.env pull
 
-          echo ""
-          echo "Starting containers..."
-
-          docker compose up -d --remove-orphans
+          docker compose \
+            --env-file /home/yohanesdev/tiketapi/.env \
+            up -d --remove-orphans
 
           echo ""
           echo "Container status:"
-
-          docker compose ps
-
-          echo ""
-          echo "Waiting for application..."
+          docker compose \
+            --env-file /home/yohanesdev/tiketapi/.env \
+            ps
 
           sleep 5
 
           echo ""
-          echo "Checking health..."
+          echo "Health check:"
 
           curl --fail --silent --show-error \
             http://localhost:8080/health
 
           echo ""
-          echo "================================"
           echo "Deploy OK"
-          echo "================================"

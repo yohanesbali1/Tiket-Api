@@ -1,4 +1,3 @@
-```yaml
 deploy:
   name: Deploy to Production
 
@@ -18,6 +17,9 @@ deploy:
     packages: read
 
   steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
     - name: Check server
       run: |
         set -e
@@ -26,21 +28,33 @@ deploy:
         echo "Docker: $(docker --version)"
         echo "Compose: $(docker compose version)"
 
+        docker info > /dev/null
+
     - name: Deploy
       env:
         GHCR_USER: ${{ github.actor }}
         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
         IMAGE_REPO: ghcr.io/${{ github.repository }}
         IMAGE_TAG: ${{ github.ref_name }}
+
+        ENV_FILE: /home/yohanesdev/tiketapi/.env
 
       run: |
         set -e
 
-        cd /home/yohanesdev/tiketapi
+        test -f docker-compose.yml
+        test -f "$ENV_FILE"
 
-        echo "Deploying:"
-        echo "Image: ${IMAGE_REPO}:${IMAGE_TAG}"
-        echo "Directory: $(pwd)"
+        echo "========================================"
+        echo "PRODUCTION DEPLOY"
+        echo "========================================"
+
+        echo "Image:"
+        echo "${IMAGE_REPO}:${IMAGE_TAG}"
+
+        echo "Tag:"
+        echo "${IMAGE_TAG}"
 
         echo "$GHCR_TOKEN" | docker login ghcr.io \
           --username "$GHCR_USER" \
@@ -48,23 +62,50 @@ deploy:
 
         export IMAGE_REPO
         export IMAGE_TAG
+        export ENV_FILE
 
-        echo "Pulling Docker image..."
-        docker compose pull
+        echo ""
+        echo "Validating Docker Compose..."
 
+        docker compose \
+          --env-file "$ENV_FILE" \
+          config -q
+
+        echo "Compose configuration OK"
+
+        echo ""
+        echo "Pulling image..."
+
+        docker compose \
+          --env-file "$ENV_FILE" \
+          pull
+
+        echo ""
         echo "Starting containers..."
-        docker compose up -d
 
-        echo "Checking containers..."
-        docker compose ps
+        docker compose \
+          --env-file "$ENV_FILE" \
+          up -d --remove-orphans
 
+        echo ""
+        echo "Container status:"
+
+        docker compose \
+          --env-file "$ENV_FILE" \
+          ps
+
+        echo ""
         echo "Waiting for application..."
+
         sleep 5
 
-        echo "Checking health..."
+        echo ""
+        echo "Health check..."
+
         curl --fail --silent --show-error \
           http://localhost:8080/health
 
         echo ""
-        echo "Deploy OK"
-```
+        echo "========================================"
+        echo "PRODUCTION DEPLOY OK"
+        echo "========================================"

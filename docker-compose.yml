@@ -9,7 +9,8 @@ services:
   api:
     image: ghcr.io/${IMAGE_REPO}:${IMAGE_TAG}
     container_name: tiket-api
-    env_file: .env
+    env_file:
+      - /home/yohanesdev/tiketapi/.env
     environment:
       - REDIS_ADDR=redis:6379
     ports:

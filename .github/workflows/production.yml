@@ -1,0 +1,70 @@
+```yaml
+deploy:
+  name: Deploy to Production
+
+  runs-on:
+    - self-hosted
+    - linux
+    - production
+
+  needs:
+    - docker
+
+  environment:
+    name: production
+
+  permissions:
+    contents: read
+    packages: read
+
+  steps:
+    - name: Check server
+      run: |
+        set -e
+
+        echo "Runner: $(hostname)"
+        echo "Docker: $(docker --version)"
+        echo "Compose: $(docker compose version)"
+
+    - name: Deploy
+      env:
+        GHCR_USER: ${{ github.actor }}
+        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMAGE_REPO: ghcr.io/${{ github.repository }}
+        IMAGE_TAG: ${{ github.ref_name }}
+
+      run: |
+        set -e
+
+        cd /home/yohanesdev/tiketapi
+
+        echo "Deploying:"
+        echo "Image: ${IMAGE_REPO}:${IMAGE_TAG}"
+        echo "Directory: $(pwd)"
+
+        echo "$GHCR_TOKEN" | docker login ghcr.io \
+          --username "$GHCR_USER" \
+          --password-stdin
+
+        export IMAGE_REPO
+        export IMAGE_TAG
+
+        echo "Pulling Docker image..."
+        docker compose pull
+
+        echo "Starting containers..."
+        docker compose up -d
+
+        echo "Checking containers..."
+        docker compose ps
+
+        echo "Waiting for application..."
+        sleep 5
+
+        echo "Checking health..."
+        curl --fail --silent --show-error \
+          http://localhost:8080/health
+
+        echo ""
+        echo "Deploy OK"
+```
